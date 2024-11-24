@@ -1,0 +1,92 @@
+services:
+  # Controller
+  kafka_controller:
+    image: confluentinc/cp-kafka:latest
+    environment:
+      # General Configs
+      ## Role in the cluster.
+      KAFKA_PROCESS_ROLES: controller 
+      ## Must be unique within the cluster.
+      KAFKA_NODE_ID: 101
+      ## Votes for himself, as there are no more controllers.
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 101@kafka_controller:8000 
+      ## Must be unique across all clusters sharing the same environment.
+      CLUSTER_ID: cluster-id
+      KAFKA_LOG_DIRS: ./controller-logs
+
+      # Networking
+      ## Comma separated list of <listener name>:<protocol> pairs. We'll always use plaintext for the sake of simplicity.
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT
+      ## Network interfaces and ports for which the controllers accepts incoming connections.
+      KAFKA_LISTENERS: CONTROLLER://0.0.0.0:8000
+      ## Defines the listener used by for inter-controller and broker-controller communications.
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+    networks:
+      ## Getting everything on the same network.
+      - kafka_network
+    ports:
+      ## Controller's port.
+      - "8000:8000"
+
+  # Broker
+  kafka_broker:
+    image: confluentinc/cp-kafka:latest
+    environment:
+      # General Configs
+      ## Role in the cluster.
+      KAFKA_PROCESS_ROLES: broker
+      ## Must be unique within the cluster.
+      KAFKA_NODE_ID: 1
+      ## Points to the only controller defined above, as there are no more controllers.
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 101@kafka_controller:8000
+      ## This is 3 by default, but since we're running on a single broker, can only have 1.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      ## Must be unique across all clusters sharing the same environment.
+      CLUSTER_ID: cluster-id
+      KAFKA_LOG_DIRS: ./kafka-data
+
+      # Networking
+      ## Network interfaces and ports for which the broker accepts incoming connections.
+      KAFKA_LISTENERS: EXTERNAL://kafka_broker:9092,INTERNAL://0.0.0.0:9093
+      ## Network interfaces and ports for which the broker accepts external connections.
+      ## i.e., this defines what the clients connect to.
+      ## I personally disagree with how this config is named and explained because,
+      ## in order to define a KAFKA_INTER_BROKER_LISTENER_NAME, you need to add it to KAFKA_ADVERTISED_LISTENERS.
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://kafka_broker:9092,INTERNAL://kafka_broker:9093
+      ## Comma separated list of <listener name>:<protocol> pairs. We'll always use plaintext for the sake of simplicity.
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      ## Defines the listener used by for inter-controller and broker-controller communications.
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      ## Defines the listener use for inter-broker communication.
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+    ports:
+      ## Broker's ports.
+      - "9092:9092"
+      - "9093:9093"
+    networks:
+      ## Getting everything on the same network.
+      - kafka_network
+    depends_on:
+      - kafka_controller
+
+  # Client
+  kafka_client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kafka_client
+    environment:
+      ## Point to your Kafka broker in the Docker network
+      KAFKA_BROKER: kafka_broker:9092 
+    networks:
+      ## Getting everything on the same network.
+      - kafka_network  
+    stdin_open: true
+    tty: true
+    depends_on:
+      ## Ensure the broker is up before running the client
+      - kafka_broker  
+
+networks:
+  kafka_network:
+    driver: bridge
